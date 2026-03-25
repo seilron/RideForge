@@ -39,9 +39,11 @@ export async function renderSessionDetail(container, sessionId) {
     .map((r) => [r.lat, r.lng]);
 
   // 지도
+  console.log(`[RideForge] GPS 포인트 수: ${gpsPoints.length}`);
   if (gpsPoints.length > 0) {
     loadKakaoMap(gpsPoints);
   } else {
+    console.warn("[RideForge] GPS 데이터 없음 → 지도 숨김");
     document.getElementById("map-section").style.display = "none";
   }
 
@@ -119,6 +121,11 @@ function statCard(label, value, unit, color, sub = "") {
 // ── 카카오 지도 ──────────────────────────────────────────────────────────────
 
 function loadKakaoMap(gpsPoints) {
+  if (!KAKAO_KEY) {
+    console.error("[RideForge] VITE_KAKAO_MAP_KEY 환경변수가 없습니다.");
+    return;
+  }
+
   if (window.kakao?.maps) {
     drawKakaoMap(gpsPoints);
     return;
@@ -128,6 +135,9 @@ function loadKakaoMap(gpsPoints) {
   script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
   script.onload = () => {
     window.kakao.maps.load(() => drawKakaoMap(gpsPoints));
+  };
+  script.onerror = () => {
+    console.error("[RideForge] 카카오 지도 SDK 로드 실패. 키 또는 도메인 설정 확인.");
   };
   document.head.appendChild(script);
 }
@@ -171,7 +181,12 @@ function drawKakaoMap(gpsPoints) {
     (b, latlng) => b.extend(latlng),
     new window.kakao.maps.LatLngBounds()
   );
-  map.setBounds(bounds, 40);
+
+  // SPA 동적 삽입 시 컨테이너 크기 재인식 필요 (다음 프레임에 호출)
+  setTimeout(() => {
+    map.relayout();
+    map.setBounds(bounds, 40);
+  }, 0);
 }
 
 // ── Chart.js ─────────────────────────────────────────────────────────────────
