@@ -1,9 +1,12 @@
 import Chart from "chart.js/auto";
 import { getAllSessionsAsc, getRecentSessions, getFitnessCache,
-         getCoachGoal, saveCoachGoal, getProfile, getRecordsBySession } from "../db/index.js";
+         getCoachGoal, saveCoachGoal, getProfile, getRecordsBySession,
+         getBike, saveBike } from "../db/index.js";
 import { calcFitness, getTSBStatus, SESSION_TYPE_META } from "../utils/load.js";
 import { calcCadenceHRCorrelation, getCadenceGrade } from "../utils/cadence.js";
 import { calcMaxHR, getHRZones } from "../utils/hr.js";
+import { buildTrainingPrompt, buildCadencePrompt, buildGearPrompt } from "../utils/prompt.js";
+import { showToast } from "./toast.js";
 
 const charts = {};
 
@@ -17,15 +20,18 @@ export async function renderCoach(container) {
     <div id="coach-c"></div>
     <div id="coach-d"></div>
     <div id="coach-e"></div>
+    <div id="coach-f"></div>
+    <div id="coach-g"></div>
   `;
 
   // 데이터 병렬 로드
-  const [fitnessCache, recentSessions28, allSessionsAsc, profile, goal] = await Promise.all([
+  const [fitnessCache, recentSessions28, allSessionsAsc, profile, goal, bike] = await Promise.all([
     getFitnessCache(),
     getRecentSessions(28),
     getAllSessionsAsc(),
     getProfile(),
     getCoachGoal(),
+    getBike(),
   ]);
 
   const fitness = fitnessCache ?? calcFitness(allSessionsAsc);
@@ -37,6 +43,8 @@ export async function renderCoach(container) {
   renderSectionC(document.getElementById("coach-c"), recentSessions28);
   renderSectionD(document.getElementById("coach-d"), recentSessions28);
   renderSectionE(document.getElementById("coach-e"), fitness, allSessionsAsc, goal);
+  renderSectionF(document.getElementById("coach-f"), fitness, recentSessions28, bike);
+  renderSectionG(document.getElementById("coach-g"), fitness, recentSessions28, profile, bike);
 }
 
 // ── 섹션 A: 컨디션 신호등 ──────────────────────────────────────────────────────
@@ -429,5 +437,208 @@ function coachStat(label, value, sub, color) {
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString("ko-KR", {
     month: "long", day: "numeric", weekday: "short",
+  });
+}
+
+// ── 섹션 F: 바이크 프로파일 + 튜닝 가이드 ────────────────────────────────────
+
+const INPUT_STYLE = "width:100%;padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.875rem";
+
+function renderSectionF(el, fitness, recentSessions, bike) {
+  el.innerHTML = `
+    <div class="coach-card" id="bike-card">
+      <div class="coach-card-title">바이크 프로파일</div>
+      <div id="bike-content"></div>
+    </div>
+    <div class="coach-card" id="tuning-card">
+      <div class="coach-card-title">장비 튜닝 가이드</div>
+      <div id="tuning-content"></div>
+    </div>
+  `;
+
+  renderBikeContent(document.getElementById("bike-content"), bike, fitness, recentSessions);
+  renderTuningContent(document.getElementById("tuning-content"), fitness, recentSessions, bike);
+}
+
+function renderBikeContent(el, bike, fitness, recentSessions) {
+  if (bike) {
+    const chainring = Array.isArray(bike.chainring) ? bike.chainring.join("/") : "—";
+    const sprocket  = Array.isArray(bike.sprocket)  ? bike.sprocket.join("-")  : "—";
+    el.innerHTML = `
+      <div style="font-size:.875rem;line-height:2;margin-bottom:14px">
+        <div><strong>${bike.brand ?? ""} ${bike.model ?? ""}</strong> (${bike.type ?? "—"})</div>
+        <div style="color:var(--muted)">구동계: ${bike.drivetrain ?? "—"} · 크랭크: ${chainring}T · 스프라켓: ${sprocket}T</div>
+        <div style="color:var(--muted)">타이어: ${bike.wheel_size ?? "—"}×${bike.tire_width ?? "—"}mm · 클리트: ${bike.cleat_type ?? "—"}</div>
+      </div>
+      <button class="btn-secondary" id="bike-edit-btn">수정</button>
+    `;
+    document.getElementById("bike-edit-btn").addEventListener("click", () => {
+      renderBikeForm(el, bike, fitness, recentSessions);
+    });
+  } else {
+    renderBikeForm(el, null, fitness, recentSessions);
+  }
+}
+
+function renderBikeForm(el, existing, fitness, recentSessions) {
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="field">
+        <label>종류</label>
+        <select id="bike-type" style="${INPUT_STYLE}">
+          ${["road","hybrid","mtb","touring"].map((t) =>
+            `<option value="${t}" ${existing?.type === t ? "selected" : ""}>${t}</option>`
+          ).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label>클리트</label>
+        <select id="bike-cleat" style="${INPUT_STYLE}">
+          ${[["none","없음"],["spd","SPD"],["spd_sl","SPD-SL"]].map(([v, l]) =>
+            `<option value="${v}" ${existing?.cleat_type === v ? "selected" : ""}>${l}</option>`
+          ).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label>브랜드</label>
+        <input type="text" id="bike-brand" value="${existing?.brand ?? ""}" placeholder="예: Trek" style="${INPUT_STYLE}" />
+      </div>
+      <div class="field">
+        <label>모델</label>
+        <input type="text" id="bike-model" value="${existing?.model ?? ""}" placeholder="예: FX3" style="${INPUT_STYLE}" />
+      </div>
+      <div class="field">
+        <label>구동계</label>
+        <input type="text" id="bike-drivetrain" value="${existing?.drivetrain ?? ""}" placeholder="예: Shimano Tiagra 10단" style="${INPUT_STYLE}" />
+      </div>
+      <div class="field">
+        <label>휠 사이즈</label>
+        <select id="bike-wheel" style="${INPUT_STYLE}">
+          ${["700c","650b","26","27.5","29"].map((w) =>
+            `<option value="${w}" ${existing?.wheel_size === w ? "selected" : ""}>${w}</option>`
+          ).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label>앞 크랭크 (예: 50/34)</label>
+        <input type="text" id="bike-chainring" value="${existing?.chainring?.join("/") ?? ""}" placeholder="50/34" style="${INPUT_STYLE}" />
+      </div>
+      <div class="field">
+        <label>뒤 스프라켓 (예: 11-34)</label>
+        <input type="text" id="bike-sprocket" value="${existing?.sprocket?.join("-") ?? ""}" placeholder="11-34" style="${INPUT_STYLE}" />
+      </div>
+      <div class="field">
+        <label>타이어 폭 (mm)</label>
+        <input type="number" id="bike-tire" value="${existing?.tire_width ?? ""}" placeholder="28" style="${INPUT_STYLE}" />
+      </div>
+    </div>
+    <button class="btn-primary" id="bike-save-btn">저장</button>
+  `;
+
+  document.getElementById("bike-save-btn").addEventListener("click", async () => {
+    const chainringRaw = document.getElementById("bike-chainring").value.trim();
+    const sprocketRaw  = document.getElementById("bike-sprocket").value.trim();
+    const newBike = {
+      type:       document.getElementById("bike-type").value,
+      brand:      document.getElementById("bike-brand").value.trim(),
+      model:      document.getElementById("bike-model").value.trim(),
+      drivetrain: document.getElementById("bike-drivetrain").value.trim(),
+      wheel_size: document.getElementById("bike-wheel").value,
+      tire_width: parseInt(document.getElementById("bike-tire").value) || null,
+      cleat_type: document.getElementById("bike-cleat").value,
+      chainring:  chainringRaw  ? chainringRaw.split("/").map(Number).filter(Boolean)  : [],
+      sprocket:   sprocketRaw   ? sprocketRaw.split("-").map(Number).filter(Boolean)   : [],
+    };
+    await saveBike(newBike);
+    renderBikeContent(el, newBike, fitness, recentSessions);
+    renderTuningContent(document.getElementById("tuning-content"), fitness, recentSessions, newBike);
+  });
+}
+
+function renderTuningContent(el, fitness, recentSessions, bike) {
+  const ctl = fitness?.ctl ?? 0;
+
+  const stages = [
+    { max: 30,  label: "입문",  items: ["헬멧 (안전 최우선)", "클리트 페달 (SPD)", "타이어 교체 (파손·마모 확인)"] },
+    { max: 60,  label: "성장",  items: ["케이던스 센서", "안장 피팅 (장거리 통증 예방)", "기어비 최적화 (스프라켓 교체)"] },
+    { max: Infinity, label: "완성", items: ["짐받이·패니어 (장거리 투어)", "장거리 안장", "투어링 타이어 (내구성)"] },
+  ];
+  const stage = stages.find((s) => ctl < s.max);
+
+  let gearDiag = "";
+  if (bike?.chainring?.length && bike?.sprocket?.length) {
+    const minGear   = Math.min(...bike.chainring) / Math.max(...bike.sprocket);
+    const minSpeed  = minGear * 85 * (bike.wheel_size === "700c" ? 2.096 : 2.0) * 60 / 1000;
+    const avgSpeed  = recentSessions.length
+      ? recentSessions.reduce((s, x) => s + (x.avg_speed ?? 0), 0) / recentSessions.filter((x) => x.avg_speed).length
+      : null;
+
+    if (avgSpeed) {
+      gearDiag = minSpeed <= avgSpeed * 0.7
+        ? `<div class="gear-diag gear-warn">⚠️ 현재 기어비(최소 ${minGear.toFixed(2)})로는 Z2 구간에서 목표 케이던스 달성이 어려울 수 있어요. 스프라켓 교체를 고려하세요.</div>`
+        : `<div class="gear-diag gear-ok">✅ 현재 기어비로 케이던스 목표 달성 가능합니다. (최저 ${minSpeed.toFixed(1)}km/h)</div>`;
+    }
+  }
+
+  el.innerHTML = `
+    <div style="margin-bottom:14px">
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">CTL ${ctl.toFixed(1)} 기준 — <strong style="color:var(--primary)">${stage.label} 단계</strong></div>
+      <ol style="padding-left:18px;line-height:2;font-size:.875rem">
+        ${stage.items.map((item) => `<li>${item}</li>`).join("")}
+      </ol>
+    </div>
+    ${gearDiag}
+  `;
+}
+
+// ── 섹션 G: Claude.ai 프롬프트 생성기 ────────────────────────────────────────
+
+function renderSectionG(el, fitness, recentSessions, profile, bike) {
+  el.innerHTML = `
+    <div class="coach-card">
+      <div class="coach-card-title">Claude.ai 에게 물어보기</div>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:14px">
+        버튼을 누르면 내 데이터가 담긴 프롬프트가 클립보드에 복사되고 Claude.ai가 열려요.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn-secondary prompt-btn" data-type="training">📊 훈련 패턴 분석 받기</button>
+        <button class="btn-secondary prompt-btn" data-type="cadence">🚴 케이던스 전환 코칭 받기</button>
+        <button class="btn-secondary prompt-btn" data-type="gear">🔧 장비 업그레이드 추천 받기</button>
+      </div>
+      <div id="prompt-fallback" style="display:none;margin-top:14px">
+        <p style="font-size:.8rem;color:var(--muted);margin-bottom:6px">클립보드 복사가 안 됐어요. 아래 텍스트를 직접 복사해 주세요:</p>
+        <textarea id="prompt-textarea" readonly style="width:100%;height:180px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.75rem;resize:vertical"></textarea>
+      </div>
+    </div>
+  `;
+
+  const params = { fitness, recentSessions, profile, bike };
+
+  el.querySelectorAll(".prompt-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const type = btn.dataset.type;
+      const text = type === "training" ? buildTrainingPrompt(params)
+                 : type === "cadence"  ? buildCadencePrompt(params)
+                 : buildGearPrompt(params);
+
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (_) {}
+
+      if (copied) {
+        window.open("https://claude.ai/new", "_blank");
+        showToast("프롬프트가 클립보드에 복사됐어요. Claude.ai에 붙여넣기 하세요.", "success", 3000);
+      } else {
+        // 클립보드 실패 시 textarea fallback
+        const fallback  = document.getElementById("prompt-fallback");
+        const textarea  = document.getElementById("prompt-textarea");
+        textarea.value  = text;
+        fallback.style.display = "block";
+        textarea.focus();
+        textarea.select();
+      }
+    });
   });
 }
