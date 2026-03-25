@@ -3,6 +3,7 @@ import { groupSessions } from "../parser/grouper.js";
 import { merge } from "../parser/merger.js";
 import { hashBuffer, isDuplicate, saveSession, getProfile, saveProfile } from "../db/index.js";
 import { navigate } from "./router.js";
+import { showToast } from "./toast.js";
 
 const FIELDS = [
   "timestamp", "elapsed_time", "speed", "distance",
@@ -166,7 +167,7 @@ async function saveAll(previewEl, saveBtn) {
   }
 }
 
-async function saveGroup(g) {
+export async function saveGroup(g) {
   let gpsMeta, hrMeta;
   if (g.metas.length === 1) {
     gpsMeta = g.metas[0];
@@ -263,4 +264,72 @@ function formatDuration(sec) {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// ── Share Target ──────────────────────────────────────────────────────────────
+
+/**
+ * Share Target으로 수신된 FIT 파일 일괄 처리
+ * URL 파라미터 ?shared=true 감지 시 호출
+ */
+export async function processPendingSharedFits() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("shared")) return;
+
+  // URL 파라미터 즉시 제거 (새로고침 시 재처리 방지)
+  const hash = window.location.hash;
+  window.history.replaceState({}, "", window.location.pathname + hash);
+
+  try {
+    const cache = await caches.open("rideforge-pending-fits");
+    const response = await cache.match("/pending-fits");
+
+    if (!response) {
+      console.warn("[RideForge] pending-fits 없음 — 이미 처리되었거나 만료됨");
+      return;
+    }
+
+    const fileDataList = await response.json();
+    await cache.delete("/pending-fits");
+
+    console.log(`[RideForge] 공유 FIT 파일 ${fileDataList.length}개 처리 시작`);
+
+    const results = { success: 0, duplicate: 0, error: 0 };
+
+    for (const { name, data } of fileDataList) {
+      try {
+        const buffer = new Uint8Array(data).buffer;
+        const meta = await detectFit(buffer, name);
+
+        if (!meta) {
+          console.warn(`[RideForge] ${name} — FIT 파싱 실패, 건너뜀`);
+          results.error++;
+          continue;
+        }
+
+        meta._buffer = buffer;
+        const group = { metas: [meta], overlapRatio: null };
+        await saveGroup(group);
+
+        if (group._duplicate) results.duplicate++;
+        else if (group._saved)  results.success++;
+
+      } catch (err) {
+        console.error(`[RideForge] ${name} 저장 실패:`, err);
+        results.error++;
+      }
+    }
+
+    notifySharedResult(results);
+
+  } catch (err) {
+    console.error("[RideForge] 공유 파일 처리 실패:", err);
+    showToast("공유 파일 처리 중 오류가 발생했습니다.", "error");
+  }
+}
+
+function notifySharedResult({ success, duplicate, error }) {
+  if (success > 0)   showToast(`${success}개 세션 저장 완료`, "success");
+  if (duplicate > 0) showToast(`${duplicate}개 중복 — 건너뜀`, "warning");
+  if (error > 0)     showToast(`${error}개 파일 처리 실패`, "error");
 }

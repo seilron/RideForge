@@ -449,6 +449,40 @@
     .zone-bar-label { font-size: 0.65rem; color: var(--muted); text-align: center; }
     .zone-bar-pct { font-size: 0.8rem; font-weight: 700; color: var(--text); }
     .zone-bar-range { font-size: 0.6rem; color: var(--muted); }
+
+    /* ── TOAST ── */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: center;
+      z-index: 9999;
+      pointer-events: none;
+    }
+    .toast {
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      background: var(--surface2);
+      color: var(--text);
+      border-left: 3px solid var(--muted);
+      box-shadow: 0 4px 16px rgba(0,0,0,.5);
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity .2s, transform .2s;
+      white-space: nowrap;
+      max-width: 320px;
+    }
+    .toast.toast-visible  { opacity: 1; transform: translateY(0); }
+    .toast.toast-success  { border-left-color: var(--green); }
+    .toast.toast-warning  { border-left-color: var(--primary); }
+    .toast.toast-error    { border-left-color: var(--red); }
+    .toast.toast-info     { border-left-color: var(--blue); }
   </style>
 </head>
 <body>
@@ -463,6 +497,7 @@
 </nav>
 
 <div id="app"></div>
+<div id="toast-container"></div>
 
 <!-- 템플릿: 프로필 카드 -->
 <template id="profile-card-tpl">

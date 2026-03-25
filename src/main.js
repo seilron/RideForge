@@ -1,4 +1,4 @@
-import { initImportUI } from "./ui/import.js";
+import { initImportUI, processPendingSharedFits } from "./ui/import.js";
 import { initProfileUI } from "./ui/profile.js";
 import { renderSessionList } from "./ui/sessions.js";
 import { renderSessionDetail } from "./ui/detail.js";
@@ -55,3 +55,6 @@ window.addEventListener("hashchange", updateNav);
 
 initRouter();
 updateNav();
+
+// Share Target 수신 처리 (앱 시작 시 1회)
+processPendingSharedFits();
