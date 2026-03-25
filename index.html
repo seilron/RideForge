@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RideForge</title>
+  <style>
+    :root {
+      --bg:       #0a0c0f;
+      --surface:  #111318;
+      --surface2: #181c23;
+      --border:   #1e2330;
+      --primary:  #f5a623;
+      --blue:     #4fc3f7;
+      --green:    #66bb6a;
+      --purple:   #ab47bc;
+      --red:      #ef5350;
+      --orange:   #ff6b35;
+      --text:     #e8ecf4;
+      --muted:    #6b7591;
+      --radius:   10px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: sticky; top: 0; z-index: 100;
+    }
+    .nav-brand {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--primary);
+    }
+    .nav-links { display: flex; gap: 4px; }
+    .nav-link {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color .15s, background .15s;
+    }
+    .nav-link:hover { color: var(--text); background: var(--surface2); }
+    .nav-link.active { color: var(--primary); background: rgba(245,166,35,.1); }
+
+    /* ── PAGE ── */
+    .page {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 28px 16px 80px;
+    }
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    .page-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    /* ── CARD ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 12px;
+    }
+    .card h2 {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 16px;
+    }
+
+    /* ── FORM ── */
+    .field { margin-bottom: 14px; }
+    .field label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .field .hint { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+
+    .field input[type="file"],
+    .field input[type="number"],
+    .field input[type="text"] {
+      display: block;
+      width: 100%;
+      padding: 9px 12px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.875rem;
+    }
+    .field input:focus { outline: none; border-color: var(--primary); }
+
+    /* ── BUTTONS ── */
+    .btn-primary {
+      padding: 10px 20px;
+      background: var(--primary);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary.full { width: 100%; padding: 12px; margin-top: 8px; }
+
+    .btn-secondary {
+      padding: 8px 16px;
+      background: transparent;
+      color: var(--primary);
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-link {
+      background: none;
+      border: none;
+      color: var(--primary);
+      font-size: 0.875rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn-back {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 0.875rem;
+      cursor: pointer;
+      padding: 0;
+    }
+    .btn-back:hover { color: var(--text); }
+    .btn-delete {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 8px;
+      flex-shrink: 0;
+    }
+    .btn-delete:hover { color: var(--red); }
+
+    /* ── PROFILE INFO ── */
+    #profile-info {
+      margin-top: 10px;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      min-height: 20px;
+      color: var(--text);
+    }
+
+    /* ── RESULT ── */
+    #result {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-size: 0.875rem;
+      line-height: 1.9;
+      margin-bottom: 12px;
+    }
+    #debug { font-size: 0.75rem; overflow-x: auto; color: var(--muted); }
+    #debug h3 { margin: 10px 0 4px; color: var(--text); }
+
+    /* ── SESSION LIST ── */
+    .session-list { display: flex; flex-direction: column; gap: 8px; }
+    .session-card {
+      display: flex;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color .15s;
+    }
+    .session-card:hover { border-color: var(--primary); }
+    .session-card-main {
+      flex: 1;
+      padding: 16px 20px;
+      cursor: pointer;
+    }
+    .session-date { font-size: 0.875rem; color: var(--muted); margin-bottom: 6px; }
+    .session-stats { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+    .session-stats .stat { font-size: 0.95rem; color: var(--text); }
+    .session-stats .stat strong { color: var(--primary); }
+    .session-source {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 0;
+      color: var(--muted);
+      line-height: 2;
+    }
+
+    /* ── DETAIL ── */
+    .detail-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .detail-date { font-size: 1rem; font-weight: 600; flex: 1; }
+    .session-source-badge {
+      font-size: 0.72rem;
+      padding: 3px 8px;
+      background: rgba(245,166,35,.12);
+      color: var(--primary);
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* ── STAT GRID ── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 2px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    @media (max-width: 600px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stat-card {
+      background: var(--surface);
+      padding: 16px 14px;
+      cursor: default;
+      transition: background .15s;
+    }
+    .stat-card:hover { background: var(--surface2); }
+    .stat-label { font-size: 0.7rem; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .stat-value { font-size: 1.6rem; font-weight: 700; color: var(--card-color, #fff); line-height: 1; }
+    .stat-unit  { font-size: 0.75rem; font-weight: 400; color: var(--muted); margin-left: 2px; }
+    .stat-sub   { font-size: 0.7rem; color: var(--muted); margin-top: 3px; }
+
+    /* ── SECTION ── */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      font-size: 0.65rem;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(245,166,35,.12);
+      color: var(--primary);
+    }
+    .chart-wrap { position: relative; height: 180px; }
+
+    /* ── KAKAO MAP ── */
+    #kakao-map {
+      height: 320px;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    /* ── TABS ── */
+    .tab-bar {
+      display: flex;
+      gap: 2px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 4px;
+      margin-bottom: 12px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 8px;
+      background: none;
+      border: none;
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color .15s, background .15s;
+    }
+    .tab-btn.active { background: var(--surface2); color: var(--primary); }
+    .tab-btn:hover:not(.active) { color: var(--text); }
+    .tab-panel.hidden { display: none; }
+
+    /* ── PERIOD NAV ── */
+    .period-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 6px 12px;
+      white-space: nowrap;
+    }
+    .period-nav button {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1rem;
+      cursor: pointer;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    .period-nav button:hover { color: var(--primary); }
+    #period-label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text);
+      min-width: 120px;
+      text-align: center;
+    }
+
+    /* ── SMART IMPORT ── */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 36px 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      margin-bottom: 16px;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--primary);
+      background: rgba(245,166,35,.04);
+      color: var(--text);
+    }
+    .import-group {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 8px;
+      transition: border-color .15s;
+    }
+    .import-group.group-saved { border-color: #66bb6a44; opacity: .7; }
+    .import-group.group-dup   { border-color: var(--border); opacity: .5; }
+    .group-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .group-date { font-size: 0.875rem; font-weight: 600; flex: 1; }
+    .group-badge {
+      font-size: 0.65rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      letter-spacing: .5px;
+    }
+    .group-badge.merge  { background: rgba(245,166,35,.15); color: var(--primary); }
+    .group-badge.solo   { background: rgba(79,195,247,.12); color: var(--blue); }
+    .group-badge.saved  { background: rgba(102,187,106,.15); color: var(--green); }
+    .group-badge.dup    { background: var(--surface2); color: var(--muted); }
+    .btn-unlink {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn-unlink:hover { color: var(--red); border-color: var(--red); }
+    .group-files { display: flex; flex-direction: column; gap: 6px; }
+    .group-file {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .file-role { font-size: 1rem; }
+    .file-name { color: var(--text); font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-dur  { flex-shrink: 0; }
+    .file-caps { flex-shrink: 0; font-size: 0.7rem; }
+    #save-all-btn {
+      display: none;
+      width: 100%;
+      padding: 12px;
+      background: var(--primary);
+      color: #000;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    #save-all-btn:disabled { opacity: .6; cursor: not-allowed; }
+
+    /* ── HR ZONES ── */
+    .zone-bars { display: flex; gap: 4px; margin-top: 16px; align-items: flex-end; }
+    .zone-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .zone-bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 4px; transition: height .4s; }
+    .zone-bar-label { font-size: 0.65rem; color: var(--muted); text-align: center; }
+    .zone-bar-pct { font-size: 0.8rem; font-weight: 700; color: var(--text); }
+    .zone-bar-range { font-size: 0.6rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-brand">RideForge</span>
+  <div class="nav-links">
+    <a class="nav-link" data-path="/sessions" href="#/sessions">기록</a>
+    <a class="nav-link" data-path="/stats"    href="#/stats">분석</a>
+    <a class="nav-link" data-path="/"         href="#/">Import</a>
+  </div>
+</nav>
+
+<div id="app"></div>
+
+<!-- 템플릿: 프로필 카드 -->
+<template id="profile-card-tpl">
+  <div class="card">
+    <h2>사용자 프로필</h2>
+    <div class="field">
+      <label for="profile-name">이름 (선택)</label>
+      <input type="text" id="profile-name" placeholder="홍길동" />
+    </div>
+    <div class="field">
+      <label for="profile-age">나이 (필수)</label>
+      <input type="number" id="profile-age" placeholder="30" min="10" max="100" />
+      <p class="hint">심박존 계산에 사용됩니다 (Tanaka 공식)</p>
+    </div>
+    <button class="btn-secondary" id="profile-save-btn">저장</button>
+    <div id="profile-info"></div>
+  </div>
+</template>
+
+<!-- 템플릿: Import 카드 (스마트 자동 그룹핑) -->
+<template id="import-card-tpl">
+  <div class="card">
+    <h2>FIT 파일 Import</h2>
+    <div id="drop-zone" class="drop-zone">
+      📂 파일을 드래그하거나 클릭해서 선택<br>
+      <span style="font-size:.75rem">.fit 파일 여러 개 동시 선택 가능</span>
+    </div>
+    <input type="file" id="fit-input" accept=".fit" multiple style="display:none" />
+    <div id="import-preview"></div>
+    <button id="save-all-btn">저장</button>
+  </div>
+</template>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
