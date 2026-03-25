@@ -450,6 +450,39 @@
     .zone-bar-pct { font-size: 0.8rem; font-weight: 700; color: var(--text); }
     .zone-bar-range { font-size: 0.6rem; color: var(--muted); }
 
+    /* ── COACH ── */
+    .coach-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-bottom: 12px;
+    }
+    .coach-card-title {
+      font-size: .8rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .coach-type-badge {
+      font-size: .75rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+    .coach-empty {
+      font-size: .85rem;
+      color: var(--muted);
+      text-align: center;
+      padding: 20px 0;
+    }
+
     /* ── TOAST ── */
     #toast-container {
       position: fixed;
@@ -492,6 +525,7 @@
   <div class="nav-links">
     <a class="nav-link" data-path="/sessions" href="#/sessions">기록</a>
     <a class="nav-link" data-path="/stats"    href="#/stats">분석</a>
+    <a class="nav-link" data-path="/coach"    href="#/coach">코치</a>
     <a class="nav-link" data-path="/"         href="#/">Import</a>
   </div>
 </nav>

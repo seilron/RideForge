@@ -1,9 +1,12 @@
 import { detectFit } from "../parser/detector.js";
 import { groupSessions } from "../parser/grouper.js";
 import { merge } from "../parser/merger.js";
-import { hashBuffer, isDuplicate, saveSession, getProfile, saveProfile } from "../db/index.js";
+import { hashBuffer, isDuplicate, saveSession, getProfile, saveProfile,
+         getAllSessionsAsc, saveFitnessCache } from "../db/index.js";
 import { navigate } from "./router.js";
 import { showToast } from "./toast.js";
+import { calcHRZoneDist, calcTrainingLoad, classifySession, calcFitness } from "../utils/load.js";
+import { calcMaxHR, getHRZones } from "../utils/hr.js";
 
 const FIELDS = [
   "timestamp", "elapsed_time", "speed", "distance",
@@ -223,11 +226,35 @@ export async function saveGroup(g) {
     ...pickFields(r),
   }));
 
+  // ── 코칭 필드 계산 (저장 전) ────────────────────────────────────────────────
+  const profile = await getProfile();
+  const maxHR   = profile?.max_hr_observed ?? calcMaxHR(profile?.age ?? 30);
+  const zones   = getHRZones(maxHR);
+
+  const hrZoneDist = calcHRZoneDist(mergedRecords, zones);
+
+  const cadValues  = mergedRecords.map((r) => r.cadence).filter((v) => v != null && v > 0);
+  const cadMean    = cadValues.length ? cadValues.reduce((a, b) => a + b, 0) / cadValues.length : 0;
+  const cadStddev  = cadValues.length
+    ? Math.round(Math.sqrt(cadValues.reduce((a, b) => a + (b - cadMean) ** 2, 0) / cadValues.length) * 10) / 10
+    : 0;
+
+  const trainingLoad  = calcTrainingLoad(session.duration, hrZoneDist);
+  const sessionWithStats = { ...session, hr_zone_dist: hrZoneDist, cadence_stddev: cadStddev };
+  const sessionType   = classifySession(sessionWithStats, zones);
+
+  Object.assign(session, {
+    hr_zone_dist:    hrZoneDist,
+    cadence_stddev:  cadStddev,
+    training_load:   trainingLoad,
+    session_type:    sessionType,
+  });
+  // ────────────────────────────────────────────────────────────────────────────
+
   await saveSession(session, records);
 
   // 실측 max_hr 갱신
   if (session.max_hr_observed) {
-    const profile = await getProfile();
     if (profile) {
       const current = profile.max_hr_observed ?? 0;
       if (session.max_hr_observed > current) {
@@ -235,6 +262,11 @@ export async function saveGroup(g) {
       }
     }
   }
+
+  // Fitness 캐시 갱신 (ATL/CTL/TSB)
+  const allSessions = await getAllSessionsAsc();
+  const fitness     = calcFitness(allSessions);
+  await saveFitnessCache({ atl: fitness.atl, ctl: fitness.ctl, tsb: fitness.tsb });
 
   g._saved = true;
 }

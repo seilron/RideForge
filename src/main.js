@@ -3,6 +3,7 @@ import { initProfileUI } from "./ui/profile.js";
 import { renderSessionList } from "./ui/sessions.js";
 import { renderSessionDetail } from "./ui/detail.js";
 import { renderStats } from "./ui/stats.js";
+import { renderCoach } from "./ui/coach.js";
 import { on, initRouter, navigate } from "./ui/router.js";
 
 const app = document.getElementById("app");
@@ -42,6 +43,11 @@ on("/session/:id", async ({ id }) => {
 on("/stats", async () => {
   app.innerHTML = `<div class="page" id="stats-page"></div>`;
   await renderStats(document.getElementById("stats-page"));
+});
+
+on("/coach", async () => {
+  app.innerHTML = `<div class="page" id="coach-page"></div>`;
+  await renderCoach(document.getElementById("coach-page"));
 });
 
 // 활성 네비게이션 링크 표시
