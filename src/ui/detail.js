@@ -81,7 +81,7 @@ function buildDetailHTML(session, sampled, zones, maxHR) {
     <!-- 지도 -->
     <div class="section" id="map-section">
       <div class="section-title">경로 <span class="badge">GPS · Wahoo</span></div>
-      <div id="kakao-map"></div>
+      <div class="map-clip"><div id="kakao-map"></div></div>
     </div>
 
     <!-- 속도 차트 -->
@@ -126,30 +126,59 @@ function loadKakaoMap(gpsPoints) {
     return;
   }
 
-  if (window.kakao?.maps) {
-    drawKakaoMap(gpsPoints);
+  // kakao.maps.Map 클래스가 실제로 존재하는지로 SDK 준비 여부 판단
+  // (autoload=false 직후에는 namespace만 있고 Map 클래스가 없을 수 있음)
+  if (typeof window.kakao?.maps?.Map === "function") {
+    waitForSizeAndDraw(gpsPoints);
     return;
   }
 
   const script = document.createElement("script");
   script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
   script.onload = () => {
-    window.kakao.maps.load(() => drawKakaoMap(gpsPoints));
+    window.kakao.maps.load(() => waitForSizeAndDraw(gpsPoints));
   };
   script.onerror = () => {
-    console.error("[RideForge] 카카오 지도 SDK 로드 실패. 키 또는 도메인 설정 확인.");
+    console.error("[RideForge] 카카오 지도 SDK 로드 실패 — 키/도메인 설정 확인");
   };
   document.head.appendChild(script);
 }
 
-function drawKakaoMap(gpsPoints) {
+/**
+ * ResizeObserver로 컨테이너가 실제로 height > 0이 된 뒤 지도 생성
+ * SPA에서 innerHTML 직후 layout이 미확정일 때의 race condition 방지
+ */
+function waitForSizeAndDraw(gpsPoints) {
   const container = document.getElementById("kakao-map");
+  if (!container) return;
+
+  if (container.offsetHeight > 0) {
+    drawKakaoMap(container, gpsPoints);
+    return;
+  }
+
+  const ro = new ResizeObserver((entries) => {
+    const h = entries[0]?.contentRect?.height ?? 0;
+    console.log(`[RideForge] kakao-map 컨테이너 height: ${h}px`);
+    if (h > 0) {
+      ro.disconnect();
+      drawKakaoMap(container, gpsPoints);
+    }
+  });
+  ro.observe(container);
+}
+
+function drawKakaoMap(container, gpsPoints) {
+  console.log(`[RideForge] drawKakaoMap 시작 — container: ${container.offsetWidth}×${container.offsetHeight}px, points: ${gpsPoints.length}`);
+
   const center = gpsPoints[Math.floor(gpsPoints.length / 2)];
 
   const map = new window.kakao.maps.Map(container, {
     center: new window.kakao.maps.LatLng(center[0], center[1]),
     level: 5,
   });
+
+  console.log("[RideForge] kakao.maps.Map 생성 완료");
 
   // 경로 폴리라인
   const path = gpsPoints.map(([lat, lng]) => new window.kakao.maps.LatLng(lat, lng));
@@ -163,30 +192,21 @@ function drawKakaoMap(gpsPoints) {
   });
 
   // 시작 마커
-  new window.kakao.maps.Marker({
-    map,
-    position: path[0],
-    title: "출발",
-  });
-
+  new window.kakao.maps.Marker({ map, position: path[0],               title: "출발" });
   // 도착 마커
-  new window.kakao.maps.Marker({
-    map,
-    position: path[path.length - 1],
-    title: "도착",
-  });
+  new window.kakao.maps.Marker({ map, position: path[path.length - 1], title: "도착" });
 
-  // 경로 전체 보이도록 bounds 맞추기
+  // 경로 전체가 보이도록 bounds 맞추기
   const bounds = path.reduce(
     (b, latlng) => b.extend(latlng),
     new window.kakao.maps.LatLngBounds()
   );
 
-  // SPA 동적 삽입 시 컨테이너 크기 재인식 필요 (다음 프레임에 호출)
-  setTimeout(() => {
-    map.relayout();
-    map.setBounds(bounds, 40);
-  }, 0);
+  // relayout → setBounds 순서로 호출 (컨테이너 크기 재인식 후 bounds 적용)
+  map.relayout();
+  map.setBounds(bounds, 40);
+
+  console.log("[RideForge] relayout + setBounds 완료");
 }
 
 // ── Chart.js ─────────────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 import Chart from "chart.js/auto";
-import { getAllSessions, getAllRecords, getProfile } from "../db/index.js";
+import { getAllSessions, getAllRecords, getProfile, getAllSessionsAsc,
+         patchSession, saveFitnessCache } from "../db/index.js";
 import { calcMaxHR, getHRZones } from "../utils/hr.js";
+import { calcHRZoneDist, calcTrainingLoad, classifySession, calcFitness } from "../utils/load.js";
 
 // ── 상태 ──────────────────────────────────────────────────────────────────────
 let activeTab    = "monthly";
@@ -29,6 +31,40 @@ export async function renderStats(container) {
   const zoneTimes = zones ? calcZoneTimes(allRecords, zones) : null;
 
   container.innerHTML = buildShell(summary, maxHR, profile, zones, zoneTimes);
+
+  // 현재 HR존 기준으로 재계산
+  container.querySelector("#btn-recalc-zones")?.addEventListener("click", async () => {
+    if (!zones) return;
+    if (!confirm("저장된 모든 세션의 HR존 분포·훈련 부하·세션 유형을\n현재 HR존 기준으로 재계산합니다.\n계속하시겠습니까?")) return;
+
+    const btn = container.querySelector("#btn-recalc-zones");
+    btn.disabled = true;
+    btn.textContent = "재계산 중…";
+
+    const recordsBySession = {};
+    for (const r of allRecords) {
+      if (!recordsBySession[r.session_id]) recordsBySession[r.session_id] = [];
+      recordsBySession[r.session_id].push(r);
+    }
+
+    for (const s of sessions) {
+      const recs = recordsBySession[s.id] ?? [];
+      if (recs.length === 0) continue;
+      const hrZoneDist = calcHRZoneDist(recs, zones);
+      const updated    = { ...s, hr_zone_dist: hrZoneDist,
+        training_load: calcTrainingLoad(s.duration, hrZoneDist),
+        session_type:  classifySession({ ...s, hr_zone_dist: hrZoneDist }, zones),
+      };
+      await patchSession(updated);
+    }
+
+    const allAsc = await getAllSessionsAsc();
+    const fitness = calcFitness(allAsc);
+    await saveFitnessCache({ atl: fitness.atl, ctl: fitness.ctl, tsb: fitness.tsb });
+
+    // 화면 새로고침
+    await renderStats(container);
+  });
 
   // 탭 전환
   container.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -170,15 +206,21 @@ function buildShell(summary, maxHR, profile, zones, zoneTimes) {
       ${sc("총 시간",   formatDur(summary.totalDuration), "",     "#f5a623")}
       ${sc("평균 속도", summary.avgSpeed.toFixed(1),      "km/h", "#66bb6a")}
       ${sc("최고 심박", maxHR ?? "—", maxHR ? "bpm" : "", "#ef5350",
-            profile?.max_hr_observed ? "실측" : profile?.age ? "Tanaka" : "")}
+            profile?.max_hr_observed ? "실측" : profile?.age ? "Nes 공식" : "")}
     </div>
 
     <!-- 심박존 -->
     ${zones && zoneTimes ? `
     <div class="section">
-      <div class="section-title">심박존 분포 <span class="badge">전체</span>
-        <span class="badge">MAX ${maxHR} bpm</span></div>
-      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div class="section-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span>심박존 분포 <span class="badge">전체</span>
+        <span class="badge">MAX ${maxHR} bpm · ${profile?.max_hr_observed ? "실측" : "Nes 공식"}</span></span>
+        <button id="btn-recalc-zones" class="btn-secondary"
+          style="font-size:0.75rem;padding:4px 10px;margin-left:auto">
+          현재 HR존으로 재계산
+        </button>
+      </div>
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-top:10px">
         <div style="width:160px;height:160px;flex-shrink:0"><canvas id="chart-zones"></canvas></div>
         <div class="zone-bars" id="zone-bars" style="flex:1;min-width:180px;align-items:flex-end"></div>
       </div>

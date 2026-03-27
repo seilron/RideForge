@@ -29,6 +29,60 @@ export async function isDuplicate(fileHash) {
 }
 
 /**
+ * 해시로 세션 조회 (보완 병합용)
+ * @returns {object|null}
+ */
+export async function getSessionByHash(fileHash) {
+  const db = await getDB();
+  return db.getFromIndex("sessions", "by_hash", fileHash);
+}
+
+/**
+ * 시간대가 겹치는 세션 조회 (보완 병합 후보 탐색)
+ * @param {number} startMs   Unix ms
+ * @param {number} endMs     Unix ms
+ * @param {number} threshold 최소 겹침 비율 (기본 0.30)
+ */
+export async function getSessionsInTimeRange(startMs, endMs, threshold = 0.30) {
+  const db = await getDB();
+  // ±2시간 여유를 두고 by_date 인덱스로 후보 조회 후 실제 겹침 필터
+  const startISO = new Date(startMs - 7_200_000).toISOString();
+  const endISO   = new Date(endMs   + 7_200_000).toISOString();
+  const range    = IDBKeyRange.bound(startISO, endISO);
+  const sessions = await db.getAllFromIndex("sessions", "by_date", range);
+  return sessions.filter((s) => {
+    const sStart = new Date(s.date).getTime();
+    const sEnd   = sStart + (s.duration ?? 0) * 1000;
+    const overlap = Math.max(0, Math.min(sEnd, endMs) - Math.max(sStart, startMs));
+    const minDur  = Math.min(sEnd - sStart, endMs - startMs);
+    return minDur > 0 && overlap / minDur >= threshold;
+  });
+}
+
+/**
+ * 세션 메타데이터만 업데이트 (레코드 변경 없음)
+ * hr_zone_dist, training_load, session_type 등 재계산 시 사용
+ */
+export async function patchSession(session) {
+  const db = await getDB();
+  await db.put("sessions", session);
+}
+
+/**
+ * 세션 + 레코드 업데이트 (기존 레코드 교체)
+ */
+export async function updateSession(session, records) {
+  const db = await getDB();
+  const oldRecords = await db.getAllFromIndex("records", "by_session", session.id);
+  const tx = db.transaction(["sessions", "records"], "readwrite");
+  tx.objectStore("sessions").put(session);
+  const recStore = tx.objectStore("records");
+  for (const r of oldRecords) recStore.delete(r.id);
+  for (const r of records)    recStore.put(r);
+  await tx.done;
+}
+
+/**
  * Session + Records 트랜잭션으로 한 번에 저장
  */
 export async function saveSession(session, records) {

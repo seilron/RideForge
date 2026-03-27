@@ -299,10 +299,15 @@
     .chart-wrap { position: relative; height: 180px; }
 
     /* ── KAKAO MAP ── */
-    #kakao-map {
-      height: 320px;
+    /* overflow:hidden을 #kakao-map에 두면 타일 div가 클리핑됨 → wrapper로 분리 */
+    .map-clip {
       border-radius: 6px;
       overflow: hidden;
+    }
+    #kakao-map {
+      height: 320px;
+      width: 100%;
+      display: block;
     }
 
     /* ── TABS ── */
@@ -554,7 +559,12 @@
     <div class="field">
       <label for="profile-age">나이 (필수)</label>
       <input type="number" id="profile-age" placeholder="30" min="10" max="100" />
-      <p class="hint">심박존 계산에 사용됩니다 (Tanaka 공식)</p>
+      <p class="hint">Nes 공식(211 − 0.64 × 나이)으로 HRmax 자동 계산</p>
+    </div>
+    <div class="field">
+      <label for="profile-maxhr">최대 심박수 HRmax (선택 — 실측값)</label>
+      <input type="number" id="profile-maxhr" min="100" max="220" />
+      <p class="hint">비워두면 Nes 공식으로 자동 계산 · Import 시 자동 갱신됨</p>
     </div>
     <button class="btn-secondary" id="profile-save-btn">저장</button>
     <div id="profile-info"></div>

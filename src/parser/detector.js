@@ -1,7 +1,5 @@
 import FitParser from "fit-file-parser";
 
-const SEMICIRCLES_TO_DEG = 180 / Math.pow(2, 31);
-
 const parser = new FitParser({
   force: true,
   speedUnit: "km/h",
@@ -62,8 +60,8 @@ export async function detectFit(buffer, fileName) {
     elapsed_time: r.elapsed_time ?? null,
     speed:        r.speed        ?? null,
     distance:     r.distance     ?? null,
-    lat:  r.position_lat  != null && Math.abs(r.position_lat)  > 1 ? r.position_lat  * SEMICIRCLES_TO_DEG : null,
-    lng:  r.position_long != null && Math.abs(r.position_long) > 1 ? r.position_long * SEMICIRCLES_TO_DEG : null,
+    lat:  r.position_lat  != null && Math.abs(r.position_lat)  > 1 ? r.position_lat  : null,
+    lng:  r.position_long != null && Math.abs(r.position_long) > 1 ? r.position_long : null,
     cadence:    r.cadence    ?? null,
     heart_rate: r.heart_rate ?? null,
     src_wahoo:  false,

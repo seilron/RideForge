@@ -2,11 +2,13 @@ import { detectFit } from "../parser/detector.js";
 import { groupSessions } from "../parser/grouper.js";
 import { merge } from "../parser/merger.js";
 import { hashBuffer, isDuplicate, saveSession, getProfile, saveProfile,
-         getAllSessionsAsc, saveFitnessCache } from "../db/index.js";
+         getAllSessionsAsc, saveFitnessCache,
+         getSessionByHash, getSessionsInTimeRange, updateSession,
+         getRecordsBySession } from "../db/index.js";
 import { navigate } from "./router.js";
 import { showToast } from "./toast.js";
 import { calcHRZoneDist, calcTrainingLoad, classifySession, calcFitness } from "../utils/load.js";
-import { calcMaxHR, getHRZones } from "../utils/hr.js";
+import { calcMaxHR, getHRZones, filterRecordsHR } from "../utils/hr.js";
 
 const FIELDS = [
   "timestamp", "elapsed_time", "speed", "distance",
@@ -116,7 +118,7 @@ function renderGroup(g, idx) {
 
   const statusClass = g._saved ? "group-saved" : g._duplicate ? "group-dup" : "";
   const statusBadge = g._saved
-    ? `<span class="group-badge saved">저장됨</span>`
+    ? `<span class="group-badge saved">${g._supplemented ? "보완됨" : "저장됨"}</span>`
     : g._duplicate
     ? `<span class="group-badge dup">중복</span>`
     : isMerged
@@ -198,9 +200,38 @@ export async function saveGroup(g) {
   // 중복 체크 (GPS 파일 해시 기준)
   const fileHash = await hashBuffer(gpsMeta._buffer);
   if (await isDuplicate(fileHash)) {
+    // GPS 파일이 이미 저장됐지만 HR 파일이 새로 들어온 경우 → 기존 세션 보완 시도
+    if (hrMeta) {
+      const existingSession = await getSessionByHash(fileHash);
+      if (existingSession?.source === "wahoo_only") {
+        await supplementSession(existingSession, gpsMeta, hrMeta, fileHash, g);
+        return;
+      }
+    }
     g._duplicate = true;
     return;
   }
+
+  // ── 기존 세션 보완 체크 ──────────────────────────────────────────────────────
+  // 별도 Import로 들어온 경우: 시간대 겹치는 기존 세션 중 보완 가능한 것을 찾아 업데이트
+  {
+    const startMs    = gpsMeta.start;
+    const endMs      = gpsMeta.end;
+    const candidates = await getSessionsInTimeRange(startMs, endMs);
+    const target     = findComplementTarget(candidates, gpsMeta, hrMeta);
+    if (target) {
+      await supplementSession(target, gpsMeta, hrMeta, fileHash, g);
+      return;
+    }
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── 프로필 + 기준 HRmax (노이즈 필터 / 존 계산에 공통 사용) ────────────────
+  const profile = await getProfile();
+  const maxHR   = (profile?.max_hr_observed ?? 0) > 0
+    ? profile.max_hr_observed
+    : calcMaxHR(profile?.age ?? 30);
+  const zones   = getHRZones(maxHR);
 
   // src 플래그 설정
   const wahooRecords = gpsMeta.records.map((r) => ({ ...r, src_wahoo: true,  src_zepp: false }));
@@ -209,7 +240,17 @@ export async function saveGroup(g) {
     : null;
   const calories = gpsMeta.calories ?? hrMeta?.calories ?? null;
 
-  const { session: summary, records: mergedRecords } = merge(wahooRecords, zeppRecords, calories);
+  const { session: rawSummary, records: rawRecords } = merge(wahooRecords, zeppRecords, calories);
+
+  // ── HR 노이즈 필터 적용 (HRmax 5% 초과 스파이크 → 선형 보간) ────────────────
+  const mergedRecords = filterRecordsHR(rawRecords, maxHR);
+
+  // 필터 후 HR 통계 재계산
+  const filteredHRs  = mergedRecords.map((r) => r.heart_rate).filter((v) => v != null);
+  const filteredMaxHR = filteredHRs.length ? Math.max(...filteredHRs) : null;
+  const filteredAvgHR = filteredHRs.length
+    ? Math.round(filteredHRs.reduce((a, b) => a + b, 0) / filteredHRs.length)
+    : null;
 
   const sessionId = crypto.randomUUID();
   const session = {
@@ -217,7 +258,10 @@ export async function saveGroup(g) {
     date:      new Date(gpsMeta.start).toISOString(),
     source:    zeppRecords ? "merged" : "wahoo_only",
     file_hash: fileHash,
-    ...summary,
+    ...rawSummary,
+    avg_hr:          filteredAvgHR          ?? rawSummary.avg_hr,
+    max_hr:          filteredMaxHR          ?? rawSummary.max_hr,
+    max_hr_observed: filteredMaxHR          ?? rawSummary.max_hr_observed,
   };
 
   const records = mergedRecords.map((r) => ({
@@ -227,10 +271,6 @@ export async function saveGroup(g) {
   }));
 
   // ── 코칭 필드 계산 (저장 전) ────────────────────────────────────────────────
-  const profile = await getProfile();
-  const maxHR   = profile?.max_hr_observed ?? calcMaxHR(profile?.age ?? 30);
-  const zones   = getHRZones(maxHR);
-
   const hrZoneDist = calcHRZoneDist(mergedRecords, zones);
 
   const cadValues  = mergedRecords.map((r) => r.cadence).filter((v) => v != null && v > 0);
@@ -364,4 +404,120 @@ function notifySharedResult({ success, duplicate, error }) {
   if (success > 0)   showToast(`${success}개 세션 저장 완료`, "success");
   if (duplicate > 0) showToast(`${duplicate}개 중복 — 건너뜀`, "warning");
   if (error > 0)     showToast(`${error}개 파일 처리 실패`, "error");
+}
+
+// ── 보완 병합 ─────────────────────────────────────────────────────────────────
+
+/**
+ * 기존 세션 목록 중 현재 파일로 보완 가능한 세션 반환
+ * - wahoo_only 세션 + HR 파일(단독 zepp, 또는 hrMeta)
+ * - zepp_only 세션  + GPS 파일(wahoo)
+ */
+function findComplementTarget(existingSessions, gpsMeta, hrMeta) {
+  for (const s of existingSessions) {
+    if (s.source === "merged") continue;
+    if (s.source === "wahoo_only" && (hrMeta?.hasHR || gpsMeta.role === "hr")) return s;
+    if (s.source === "zepp_only"  && gpsMeta.hasGps) return s;
+  }
+  return null;
+}
+
+/**
+ * 기존 세션을 새 파일 데이터로 보완 병합 후 DB 업데이트
+ *
+ * @param {object} existing      보완 대상 기존 세션
+ * @param {object} gpsMeta       현재 import의 gpsMeta (단독이면 zepp일 수도 있음)
+ * @param {object|null} hrMeta   현재 import의 hrMeta
+ * @param {string} gpsFileHash   gpsMeta 파일 해시 (미리 계산됨)
+ * @param {object} g             group 객체 (상태 플래그 설정용)
+ */
+async function supplementSession(existing, gpsMeta, hrMeta, gpsFileHash, g) {
+  const existingRecords = await getRecordsBySession(existing.id);
+
+  let wahooRecords, zeppRecords, newFileHash;
+
+  if (existing.source === "wahoo_only") {
+    // 기존 Wahoo records + 새 Zepp(HR) records
+    wahooRecords = existingRecords.map((r) => ({ ...r, src_wahoo: true,  src_zepp: false }));
+    const hrSource = hrMeta ?? gpsMeta; // hrMeta가 있으면 hrMeta, 단독 zepp이면 gpsMeta
+    zeppRecords  = hrSource.records.map((r) => ({ ...r, src_wahoo: false, src_zepp: true }));
+    newFileHash  = existing.file_hash; // GPS(Wahoo) 해시 유지
+
+  } else if (existing.source === "zepp_only") {
+    // 새 Wahoo(GPS) records + 기존 Zepp records
+    wahooRecords = gpsMeta.records.map((r) => ({ ...r, src_wahoo: true,  src_zepp: false }));
+    zeppRecords  = existingRecords.map((r) => ({ ...r, src_wahoo: false, src_zepp: true }));
+    newFileHash  = gpsFileHash; // 새 GPS(Wahoo) 해시로 교체
+
+  } else {
+    return; // 보완 불가
+  }
+
+  const calories = existing.calories ?? gpsMeta.calories ?? hrMeta?.calories ?? null;
+  const { session: rawSummary, records: rawRecords } = merge(wahooRecords, zeppRecords, calories);
+
+  // 코칭 필드 재계산 + 노이즈 필터
+  const profile = await getProfile();
+  const maxHR   = (profile?.max_hr_observed ?? 0) > 0
+    ? profile.max_hr_observed
+    : calcMaxHR(profile?.age ?? 30);
+  const zones   = getHRZones(maxHR);
+
+  const mergedRecords = filterRecordsHR(rawRecords, maxHR);
+  const filteredHRs   = mergedRecords.map((r) => r.heart_rate).filter((v) => v != null);
+  const filteredMaxHR = filteredHRs.length ? Math.max(...filteredHRs) : null;
+  const filteredAvgHR = filteredHRs.length
+    ? Math.round(filteredHRs.reduce((a, b) => a + b, 0) / filteredHRs.length)
+    : null;
+
+  const session = {
+    ...existing,
+    source: "merged",
+    file_hash: newFileHash,
+    ...rawSummary,
+    avg_hr:          filteredAvgHR ?? rawSummary.avg_hr,
+    max_hr:          filteredMaxHR ?? rawSummary.max_hr,
+    max_hr_observed: filteredMaxHR ?? rawSummary.max_hr_observed,
+  };
+
+  const records = mergedRecords.map((r) => ({
+    id:         crypto.randomUUID(),
+    session_id: existing.id,
+    ...pickFields(r),
+  }));
+
+  const hrZoneDist = calcHRZoneDist(mergedRecords, zones);
+  const cadValues  = mergedRecords.map((r) => r.cadence).filter((v) => v != null && v > 0);
+  const cadMean    = cadValues.length ? cadValues.reduce((a, b) => a + b, 0) / cadValues.length : 0;
+  const cadStddev  = cadValues.length
+    ? Math.round(Math.sqrt(cadValues.reduce((a, v) => a + (v - cadMean) ** 2, 0) / cadValues.length) * 10) / 10
+    : 0;
+  const trainingLoad    = calcTrainingLoad(session.duration, hrZoneDist);
+  const sessionWithStats = { ...session, hr_zone_dist: hrZoneDist, cadence_stddev: cadStddev };
+  const sessionType     = classifySession(sessionWithStats, zones);
+
+  Object.assign(session, {
+    hr_zone_dist:   hrZoneDist,
+    cadence_stddev: cadStddev,
+    training_load:  trainingLoad,
+    session_type:   sessionType,
+  });
+
+  await updateSession(session, records);
+
+  // 실측 max_hr 갱신
+  if (session.max_hr_observed) {
+    const latestProfile = await getProfile();
+    if (latestProfile && session.max_hr_observed > (latestProfile.max_hr_observed ?? 0)) {
+      await saveProfile({ ...latestProfile, max_hr_observed: session.max_hr_observed });
+    }
+  }
+
+  // Fitness 캐시 갱신
+  const allSessions = await getAllSessionsAsc();
+  const fitness     = calcFitness(allSessions);
+  await saveFitnessCache({ atl: fitness.atl, ctl: fitness.ctl, tsb: fitness.tsb });
+
+  g._supplemented = true;
+  g._saved        = true;
 }
