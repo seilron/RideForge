@@ -1,4 +1,4 @@
-import { getAllSessions, deleteSession } from "../db/index.js";
+import { getAllSessions, deleteSession, exportAllData, importData } from "../db/index.js";
 import { navigate } from "./router.js";
 
 /**
@@ -10,12 +10,46 @@ export async function renderSessionList(container) {
   container.innerHTML = `
     <div class="page-header">
       <h2 class="page-title">라이딩 기록</h2>
-      <button class="btn-primary" id="goto-import">+ Import</button>
+      <div class="page-header-actions">
+        <button class="btn-secondary" id="btn-export" title="전체 데이터 내보내기">내보내기</button>
+        <button class="btn-secondary" id="btn-import-backup" title="백업 파일 가져오기">가져오기</button>
+        <button class="btn-primary" id="goto-import">+ Import</button>
+      </div>
     </div>
   `;
 
   document.getElementById("goto-import")
     .addEventListener("click", () => navigate("/"));
+
+  document.getElementById("btn-export").addEventListener("click", async () => {
+    const data = await exportAllData();
+    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rideforge-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById("btn-import-backup").addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        const { imported, skipped } = await importData(data);
+        alert(`가져오기 완료\n추가: ${imported}개 세션\n중복 건너뜀: ${skipped}개`);
+        if (imported > 0) renderSessionList(container);
+      } catch {
+        alert("올바른 RideForge 백업 파일이 아닙니다.");
+      }
+    };
+    input.click();
+  });
 
   if (sessions.length === 0) {
     container.insertAdjacentHTML("beforeend", `

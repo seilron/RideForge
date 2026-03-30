@@ -33,22 +33,28 @@ export async function renderSessionDetail(container, sessionId) {
   document.getElementById("back-btn")
     .addEventListener("click", () => navigate("/sessions"));
 
-  // GPS 좌표 추출 (속도 포함)
+  // GPS 좌표 추출 (속도 + elapsed_time 포함)
   const gpsRecords = records
     .filter((r) => r.lat != null && r.lng != null)
-    .map((r) => ({ lat: r.lat, lng: r.lng, speed: r.speed ?? 0 }));
+    .map((r) => ({ lat: r.lat, lng: r.lng, speed: r.speed ?? 0, elapsed_time: r.elapsed_time ?? 0 }));
+
+  // 차트 인덱스 → GPS 위치 매핑 (지도-차트 연동용)
+  const chartToGps = buildChartToGps(sampled, gpsRecords);
+
+  // 지도 커서 공유 ref
+  const cursorRef = { move: null, hide: null };
 
   // 지도
   console.log(`[RideForge] GPS 포인트 수: ${gpsRecords.length}`);
   if (gpsRecords.length > 0) {
-    loadKakaoMap(gpsRecords);
+    loadKakaoMap(gpsRecords, cursorRef);
   } else {
     console.warn("[RideForge] GPS 데이터 없음 → 지도 숨김");
     document.getElementById("map-section").style.display = "none";
   }
 
   // 차트
-  renderCharts(sampled, zones);
+  renderCharts(sampled, zones, chartToGps, cursorRef);
 
   // 심박존 바
   if (zones) renderZoneBars(records, zones);
@@ -125,21 +131,21 @@ function statCard(label, value, unit, color, sub = "") {
 
 // ── 카카오 지도 ──────────────────────────────────────────────────────────────
 
-function loadKakaoMap(gpsRecords) {
+function loadKakaoMap(gpsRecords, cursorRef) {
   if (!KAKAO_KEY) {
     console.error("[RideForge] VITE_KAKAO_MAP_KEY 환경변수가 없습니다.");
     return;
   }
 
   if (typeof window.kakao?.maps?.Map === "function") {
-    waitForSizeAndDraw(gpsRecords);
+    waitForSizeAndDraw(gpsRecords, cursorRef);
     return;
   }
 
   const script = document.createElement("script");
   script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
   script.onload = () => {
-    window.kakao.maps.load(() => waitForSizeAndDraw(gpsRecords));
+    window.kakao.maps.load(() => waitForSizeAndDraw(gpsRecords, cursorRef));
   };
   script.onerror = () => {
     console.error("[RideForge] 카카오 지도 SDK 로드 실패 — 키/도메인 설정 확인");
@@ -151,12 +157,12 @@ function loadKakaoMap(gpsRecords) {
  * ResizeObserver로 컨테이너가 실제로 height > 0이 된 뒤 지도 생성
  * SPA에서 innerHTML 직후 layout이 미확정일 때의 race condition 방지
  */
-function waitForSizeAndDraw(gpsRecords) {
+function waitForSizeAndDraw(gpsRecords, cursorRef) {
   const container = document.getElementById("kakao-map");
   if (!container) return;
 
   if (container.offsetHeight > 0) {
-    drawKakaoMap(container, gpsRecords);
+    drawKakaoMap(container, gpsRecords, cursorRef);
     return;
   }
 
@@ -165,13 +171,13 @@ function waitForSizeAndDraw(gpsRecords) {
     console.log(`[RideForge] kakao-map 컨테이너 height: ${h}px`);
     if (h > 0) {
       ro.disconnect();
-      drawKakaoMap(container, gpsRecords);
+      drawKakaoMap(container, gpsRecords, cursorRef);
     }
   });
   ro.observe(container);
 }
 
-function drawKakaoMap(container, gpsRecords) {
+function drawKakaoMap(container, gpsRecords, cursorRef) {
   console.log(`[RideForge] drawKakaoMap 시작 — container: ${container.offsetWidth}×${container.offsetHeight}px, points: ${gpsRecords.length}`);
 
   // 세그먼트 수 제한 (성능) — 최대 300개로 다운샘플
@@ -210,6 +216,28 @@ function drawKakaoMap(container, gpsRecords) {
   // 시작 / 도착 마커
   new window.kakao.maps.Marker({ map, position: latLngs[0],                  title: "출발" });
   new window.kakao.maps.Marker({ map, position: latLngs[latLngs.length - 1], title: "도착" });
+
+  // 차트 hover 연동 커서
+  if (cursorRef) {
+    const el = document.createElement("div");
+    el.style.cssText = [
+      "width:14px", "height:14px", "background:#fff",
+      "border:2.5px solid #f5a623", "border-radius:50%",
+      "transform:translate(-50%,-50%)", "pointer-events:none",
+      "display:none", "box-shadow:0 0 4px rgba(0,0,0,0.4)",
+    ].join(";");
+    const overlay = new window.kakao.maps.CustomOverlay({
+      position: latLngs[0],
+      content: el,
+      zIndex: 10,
+    });
+    overlay.setMap(map);
+    cursorRef.move = (lat, lng) => {
+      el.style.display = "block";
+      overlay.setPosition(new window.kakao.maps.LatLng(lat, lng));
+    };
+    cursorRef.hide = () => { el.style.display = "none"; };
+  }
 
   // bounds
   const bounds = latLngs.reduce(
@@ -253,14 +281,26 @@ function speedToColor(speed, minSpeed, maxSpeed) {
 
 // ── Chart.js ─────────────────────────────────────────────────────────────────
 
-function renderCharts(sampled, zones) {
+function renderCharts(sampled, zones, chartToGps, cursorRef) {
   const labels = sampled.map((r) => formatElapsed(r.elapsed_time));
+
+  const onHover = (chartToGps && cursorRef)
+    ? (_e, elements) => {
+        if (elements.length > 0) {
+          const gp = chartToGps[elements[0].index];
+          if (gp) cursorRef.move?.(gp.lat, gp.lng);
+        } else {
+          cursorRef.hide?.();
+        }
+      }
+    : null;
 
   const chartOpts = (yLabel, color, yMax) => ({
     responsive: true,
     maintainAspectRatio: false,
     animation: false,
     plugins: { legend: { display: false } },
+    ...(onHover ? { onHover } : {}),
     scales: {
       x: {
         ticks: { color: "#6b7591", maxTicksLimit: 8, font: { size: 11 } },
@@ -397,6 +437,25 @@ function renderZoneBars(records, zones) {
 }
 
 // ── 유틸 ─────────────────────────────────────────────────────────────────────
+
+/**
+ * 차트 샘플 인덱스 → GPS 포인트 매핑 (elapsed_time 기준 nearest-neighbor)
+ * 두 배열 모두 elapsed_time 오름차순 정렬 전제
+ */
+function buildChartToGps(sampled, gpsRecords) {
+  if (gpsRecords.length === 0) return null;
+  return sampled.map((s) => {
+    const et = s.elapsed_time ?? 0;
+    let best = gpsRecords[0];
+    let bestDiff = Math.abs((gpsRecords[0].elapsed_time ?? 0) - et);
+    for (const gp of gpsRecords) {
+      const diff = Math.abs((gp.elapsed_time ?? 0) - et);
+      if (diff < bestDiff) { best = gp; bestDiff = diff; }
+      else if (diff > bestDiff) break; // 정렬 보장 → 조기 종료
+    }
+    return best;
+  });
+}
 
 function downsample(records, intervalSec) {
   const result = [];

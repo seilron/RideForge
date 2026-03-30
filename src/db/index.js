@@ -247,3 +247,50 @@ export async function getRecentSessions(days = 28) {
   cutoff.setDate(cutoff.getDate() - days);
   return all.filter((s) => new Date(s.date) >= cutoff);
 }
+
+/**
+ * 전체 데이터 내보내기 (sessions + records + settings)
+ * @returns {{ version, exportedAt, sessions, records, settings }}
+ */
+export async function exportAllData() {
+  const db = await getDB();
+  const [sessions, records, settings] = await Promise.all([
+    db.getAll("sessions"),
+    db.getAll("records"),
+    db.getAll("settings"),
+  ]);
+  return { version: 1, exportedAt: new Date().toISOString(), sessions, records, settings };
+}
+
+/**
+ * 백업 JSON 가져오기 — 중복 세션(file_hash)은 건너뜀
+ * @param {{ sessions, records }} backup
+ * @returns {{ imported: number, skipped: number }}
+ */
+export async function importData(backup) {
+  const { sessions = [], records = [] } = backup;
+  const db = await getDB();
+
+  // 중복 체크
+  const toImport = [];
+  let skipped = 0;
+  for (const s of sessions) {
+    if (s.file_hash) {
+      const existing = await db.getFromIndex("sessions", "by_hash", s.file_hash);
+      if (existing) { skipped++; continue; }
+    }
+    toImport.push(s);
+  }
+
+  if (toImport.length === 0) return { imported: 0, skipped };
+
+  const ids = new Set(toImport.map((s) => s.id));
+  const recs = records.filter((r) => ids.has(r.session_id));
+
+  const tx = db.transaction(["sessions", "records"], "readwrite");
+  for (const s of toImport)  tx.objectStore("sessions").put(s);
+  for (const r of recs)      tx.objectStore("records").put(r);
+  await tx.done;
+
+  return { imported: toImport.length, skipped };
+}
