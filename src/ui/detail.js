@@ -33,15 +33,15 @@ export async function renderSessionDetail(container, sessionId) {
   document.getElementById("back-btn")
     .addEventListener("click", () => navigate("/sessions"));
 
-  // GPS 좌표 추출
-  const gpsPoints = records
+  // GPS 좌표 추출 (속도 포함)
+  const gpsRecords = records
     .filter((r) => r.lat != null && r.lng != null)
-    .map((r) => [r.lat, r.lng]);
+    .map((r) => ({ lat: r.lat, lng: r.lng, speed: r.speed ?? 0 }));
 
   // 지도
-  console.log(`[RideForge] GPS 포인트 수: ${gpsPoints.length}`);
-  if (gpsPoints.length > 0) {
-    loadKakaoMap(gpsPoints);
+  console.log(`[RideForge] GPS 포인트 수: ${gpsRecords.length}`);
+  if (gpsRecords.length > 0) {
+    loadKakaoMap(gpsRecords);
   } else {
     console.warn("[RideForge] GPS 데이터 없음 → 지도 숨김");
     document.getElementById("map-section").style.display = "none";
@@ -82,6 +82,11 @@ function buildDetailHTML(session, sampled, zones, maxHR) {
     <div class="section" id="map-section">
       <div class="section-title">경로 <span class="badge">GPS · Wahoo</span></div>
       <div class="map-clip"><div id="kakao-map"></div></div>
+      <div class="speed-legend">
+        <span class="speed-legend-label">느림</span>
+        <div class="speed-legend-bar"></div>
+        <span class="speed-legend-label">빠름</span>
+      </div>
     </div>
 
     <!-- 속도 차트 -->
@@ -120,23 +125,21 @@ function statCard(label, value, unit, color, sub = "") {
 
 // ── 카카오 지도 ──────────────────────────────────────────────────────────────
 
-function loadKakaoMap(gpsPoints) {
+function loadKakaoMap(gpsRecords) {
   if (!KAKAO_KEY) {
     console.error("[RideForge] VITE_KAKAO_MAP_KEY 환경변수가 없습니다.");
     return;
   }
 
-  // kakao.maps.Map 클래스가 실제로 존재하는지로 SDK 준비 여부 판단
-  // (autoload=false 직후에는 namespace만 있고 Map 클래스가 없을 수 있음)
   if (typeof window.kakao?.maps?.Map === "function") {
-    waitForSizeAndDraw(gpsPoints);
+    waitForSizeAndDraw(gpsRecords);
     return;
   }
 
   const script = document.createElement("script");
   script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
   script.onload = () => {
-    window.kakao.maps.load(() => waitForSizeAndDraw(gpsPoints));
+    window.kakao.maps.load(() => waitForSizeAndDraw(gpsRecords));
   };
   script.onerror = () => {
     console.error("[RideForge] 카카오 지도 SDK 로드 실패 — 키/도메인 설정 확인");
@@ -148,12 +151,12 @@ function loadKakaoMap(gpsPoints) {
  * ResizeObserver로 컨테이너가 실제로 height > 0이 된 뒤 지도 생성
  * SPA에서 innerHTML 직후 layout이 미확정일 때의 race condition 방지
  */
-function waitForSizeAndDraw(gpsPoints) {
+function waitForSizeAndDraw(gpsRecords) {
   const container = document.getElementById("kakao-map");
   if (!container) return;
 
   if (container.offsetHeight > 0) {
-    drawKakaoMap(container, gpsPoints);
+    drawKakaoMap(container, gpsRecords);
     return;
   }
 
@@ -162,51 +165,90 @@ function waitForSizeAndDraw(gpsPoints) {
     console.log(`[RideForge] kakao-map 컨테이너 height: ${h}px`);
     if (h > 0) {
       ro.disconnect();
-      drawKakaoMap(container, gpsPoints);
+      drawKakaoMap(container, gpsRecords);
     }
   });
   ro.observe(container);
 }
 
-function drawKakaoMap(container, gpsPoints) {
-  console.log(`[RideForge] drawKakaoMap 시작 — container: ${container.offsetWidth}×${container.offsetHeight}px, points: ${gpsPoints.length}`);
+function drawKakaoMap(container, gpsRecords) {
+  console.log(`[RideForge] drawKakaoMap 시작 — container: ${container.offsetWidth}×${container.offsetHeight}px, points: ${gpsRecords.length}`);
 
-  const center = gpsPoints[Math.floor(gpsPoints.length / 2)];
+  // 세그먼트 수 제한 (성능) — 최대 300개로 다운샘플
+  const MAX_SEGMENTS = 300;
+  const step = gpsRecords.length > MAX_SEGMENTS
+    ? Math.ceil(gpsRecords.length / MAX_SEGMENTS)
+    : 1;
+  const sampled = gpsRecords.filter((_, i) => i % step === 0 || i === gpsRecords.length - 1);
 
+  const center = sampled[Math.floor(sampled.length / 2)];
   const map = new window.kakao.maps.Map(container, {
-    center: new window.kakao.maps.LatLng(center[0], center[1]),
+    center: new window.kakao.maps.LatLng(center.lat, center.lng),
     level: 5,
   });
 
   console.log("[RideForge] kakao.maps.Map 생성 완료");
 
-  // 경로 폴리라인
-  const path = gpsPoints.map(([lat, lng]) => new window.kakao.maps.LatLng(lat, lng));
-  new window.kakao.maps.Polyline({
-    map,
-    path,
-    strokeWeight: 4,
-    strokeColor: "#f5a623",
-    strokeOpacity: 0.9,
-    strokeStyle: "solid",
-  });
+  // 속도 범위 계산
+  const speeds = sampled.map((r) => r.speed);
+  const minSpeed = Math.min(...speeds);
+  const maxSpeed = Math.max(...speeds);
 
-  // 시작 마커
-  new window.kakao.maps.Marker({ map, position: path[0],               title: "출발" });
-  // 도착 마커
-  new window.kakao.maps.Marker({ map, position: path[path.length - 1], title: "도착" });
+  // 구간별 속도 색상 폴리라인
+  const latLngs = sampled.map((r) => new window.kakao.maps.LatLng(r.lat, r.lng));
+  for (let i = 0; i < sampled.length - 1; i++) {
+    new window.kakao.maps.Polyline({
+      map,
+      path: [latLngs[i], latLngs[i + 1]],
+      strokeWeight: 4,
+      strokeColor: speedToColor(sampled[i].speed, minSpeed, maxSpeed),
+      strokeOpacity: 0.9,
+      strokeStyle: "solid",
+    });
+  }
 
-  // 경로 전체가 보이도록 bounds 맞추기
-  const bounds = path.reduce(
+  // 시작 / 도착 마커
+  new window.kakao.maps.Marker({ map, position: latLngs[0],                  title: "출발" });
+  new window.kakao.maps.Marker({ map, position: latLngs[latLngs.length - 1], title: "도착" });
+
+  // bounds
+  const bounds = latLngs.reduce(
     (b, latlng) => b.extend(latlng),
     new window.kakao.maps.LatLngBounds()
   );
-
-  // relayout → setBounds 순서로 호출 (컨테이너 크기 재인식 후 bounds 적용)
   map.relayout();
   map.setBounds(bounds, 40);
 
   console.log("[RideForge] relayout + setBounds 완료");
+}
+
+/**
+ * 속도값 → 색상 보간 (파랑 → 초록 → 주황 → 빨강)
+ */
+function speedToColor(speed, minSpeed, maxSpeed) {
+  const t = maxSpeed > minSpeed
+    ? Math.max(0, Math.min(1, (speed - minSpeed) / (maxSpeed - minSpeed)))
+    : 0;
+
+  // 색상 정류장: 파랑 → 초록 → 주황 → 빨강
+  const stops = [
+    [79,  195, 247],  // #4fc3f7
+    [102, 187, 106],  // #66bb6a
+    [245, 166,  35],  // #f5a623
+    [239,  83,  80],  // #ef5350
+  ];
+
+  const pos     = t * (stops.length - 1);
+  const idx     = Math.min(Math.floor(pos), stops.length - 2);
+  const frac    = pos - idx;
+  const [r0, g0, b0] = stops[idx];
+  const [r1, g1, b1] = stops[idx + 1];
+
+  const r = Math.round(r0 + (r1 - r0) * frac);
+  const g = Math.round(g0 + (g1 - g0) * frac);
+  const b = Math.round(b0 + (b1 - b0) * frac);
+
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
 
 // ── Chart.js ─────────────────────────────────────────────────────────────────
