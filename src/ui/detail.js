@@ -193,7 +193,6 @@ function drawKakaoMap(container, gpsRecords) {
   const speeds = sampled.map((r) => r.speed);
   const minSpeed = Math.min(...speeds);
   const maxSpeed = Math.max(...speeds);
-  console.log(`[RideForge] 속도 범위: min=${minSpeed} max=${maxSpeed} 샘플=`, speeds.slice(0, 5));
 
   // 구간별 속도 색상 폴리라인
   const latLngs = sampled.map((r) => new window.kakao.maps.LatLng(r.lat, r.lng));
