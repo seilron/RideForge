@@ -4,6 +4,14 @@ import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
 
+// 새 SW가 설치되면 대기 없이 즉시 활성화
+self.addEventListener("install", () => self.skipWaiting());
+
+// 활성화 즉시 모든 열린 클라이언트(탭/PWA) 제어권 획득
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Share Target POST 수신 처리
 // ─────────────────────────────────────────────────────────────────────────────
