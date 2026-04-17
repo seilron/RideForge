@@ -324,11 +324,15 @@ function renderSectionE(el, fitness, allSessions, goal) {
     return Math.round((fitness.ctl + (TARGET_CTL - fitness.ctl) * progress) * 10) / 10;
   });
 
-  // "지금 페이스라면 목표일 CTL 예상"
-  const ctlPerWeek  = history.length >= 8
-    ? (history[history.length - 1].ctl - history[history.length - 8].ctl) / 7
+  // "지금 페이스라면 목표일 CTL 예상" — EMA 수렴 공식으로 예측
+  // CTL(t) = CTL₀ × (1-k)^t + avgLoad × (1-(1-k)^t),  k = 1/42
+  const recent28 = history.slice(-28);
+  const avgDailyLoad = recent28.length > 0
+    ? recent28.reduce((s, h) => s + (h.load ?? 0), 0) / recent28.length
     : 0;
-  const predictCTL  = Math.round((fitness.ctl + ctlPerWeek * daysLeft) * 10) / 10;
+  const K = 1 / 42;
+  const decay = Math.pow(1 - K, daysLeft);
+  const predictCTL = Math.round((fitness.ctl * decay + avgDailyLoad * (1 - decay)) * 10) / 10;
 
   el.innerHTML = `
     <div class="coach-card">
