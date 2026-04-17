@@ -158,6 +158,31 @@ function drawMonthlyCharts(sessions) {
   mkBar("chart-m-count", labels, count, "#f5a623", "회");
   mkLine("chart-m-speed", labels, avgArr(speeds), "#66bb6a", "km/h");
   mkLine("chart-m-cad",   labels, avgArr(cadences), "#ab47bc", "rpm");
+
+  // 훈련 강도 분포 (Easy / Mod / Hard)
+  const pEasy = new Array(weeks.length).fill(0);
+  const pMod  = new Array(weeks.length).fill(0);
+  const pHard = new Array(weeks.length).fill(0);
+  for (const s of sessions) {
+    if (!s.hr_zone_dist) continue;
+    const d = new Date(s.date);
+    const idx = weeks.findIndex((mon) => d >= mon && d <= addDays(mon, 6));
+    if (idx < 0) continue;
+    const durMin = (s.duration ?? 0) / 60;
+    pEasy[idx] += durMin * ((s.hr_zone_dist.z1 ?? 0) + (s.hr_zone_dist.z2 ?? 0));
+    pMod[idx]  += durMin *  (s.hr_zone_dist.z3 ?? 0);
+    pHard[idx] += durMin * ((s.hr_zone_dist.z4 ?? 0) + (s.hr_zone_dist.z5 ?? 0));
+  }
+  const totalE = pEasy.reduce((a, b) => a + b, 0);
+  const totalM = pMod.reduce((a, b) => a + b, 0);
+  const totalH = pHard.reduce((a, b) => a + b, 0);
+  const summaryMEl = document.getElementById("polar-summary-m");
+  if (summaryMEl) summaryMEl.innerHTML = polarSummaryHtml(totalE, totalM, totalH);
+  mkStackedBar("chart-m-polar", labels,
+    pEasy.map((v) => +v.toFixed(0)),
+    pMod.map((v)  => +v.toFixed(0)),
+    pHard.map((v) => +v.toFixed(0)),
+  );
 }
 
 // ── 주간 차트 (요일별) ─────────────────────────────────────────────────────────
@@ -188,6 +213,31 @@ function drawWeeklyCharts(sessions) {
   mkBar("chart-w-count", DAY_LABELS, count, "#4fc3f7", "회");
   mkLine("chart-w-hr",  DAY_LABELS, avgArr(hrs),      "#ef5350", "bpm");
   mkLine("chart-w-cad", DAY_LABELS, avgArr(cadences), "#ab47bc", "rpm");
+
+  // 훈련 강도 분포 (Easy / Mod / Hard)
+  const wEasy = new Array(7).fill(0);
+  const wMod  = new Array(7).fill(0);
+  const wHard = new Array(7).fill(0);
+  for (const s of sessions) {
+    if (!s.hr_zone_dist) continue;
+    const d = new Date(s.date);
+    if (d < viewWeekStart || d > weekEnd) continue;
+    const dayIdx = (d.getDay() + 6) % 7;
+    const durMin = (s.duration ?? 0) / 60;
+    wEasy[dayIdx] += durMin * ((s.hr_zone_dist.z1 ?? 0) + (s.hr_zone_dist.z2 ?? 0));
+    wMod[dayIdx]  += durMin *  (s.hr_zone_dist.z3 ?? 0);
+    wHard[dayIdx] += durMin * ((s.hr_zone_dist.z4 ?? 0) + (s.hr_zone_dist.z5 ?? 0));
+  }
+  const wTotalE = wEasy.reduce((a, b) => a + b, 0);
+  const wTotalM = wMod.reduce((a, b) => a + b, 0);
+  const wTotalH = wHard.reduce((a, b) => a + b, 0);
+  const summaryWEl = document.getElementById("polar-summary-w");
+  if (summaryWEl) summaryWEl.innerHTML = polarSummaryHtml(wTotalE, wTotalM, wTotalH);
+  mkStackedBar("chart-w-polar", DAY_LABELS,
+    wEasy.map((v) => +v.toFixed(0)),
+    wMod.map((v)  => +v.toFixed(0)),
+    wHard.map((v) => +v.toFixed(0)),
+  );
 }
 
 // ── HTML 뼈대 ─────────────────────────────────────────────────────────────────
@@ -257,6 +307,11 @@ function buildShell(summary, maxHR, profile, zones, zoneTimes) {
         <div class="section-title">케이던스 트렌드 <span class="badge">주차별 rpm</span></div>
         <div class="chart-wrap" style="height:140px"><canvas id="chart-m-cad"></canvas></div>
       </div>
+      <div class="section">
+        <div class="section-title">훈련 강도 분포 <span class="badge">주차별 분</span></div>
+        <div id="polar-summary-m" class="polar-summary"></div>
+        <div class="chart-wrap" style="height:180px"><canvas id="chart-m-polar"></canvas></div>
+      </div>
     </div>
 
     <!-- 주간 패널 -->
@@ -277,6 +332,11 @@ function buildShell(summary, maxHR, profile, zones, zoneTimes) {
         <div class="section-title">케이던스 <span class="badge">요일별 rpm</span></div>
         <div class="chart-wrap" style="height:140px"><canvas id="chart-w-cad"></canvas></div>
       </div>
+      <div class="section">
+        <div class="section-title">훈련 강도 분포 <span class="badge">요일별 분</span></div>
+        <div id="polar-summary-w" class="polar-summary"></div>
+        <div class="chart-wrap" style="height:180px"><canvas id="chart-w-polar"></canvas></div>
+      </div>
     </div>
   `;
 }
@@ -288,6 +348,55 @@ const BASE = (yLabel) => ({
   plugins: { legend: { display: false } },
   scales: { x: AX, y: { ...AX, title: { display: true, text: yLabel, color: "#6b7591", font: { size: 11 } } } },
 });
+
+function mkStackedBar(id, labels, easyData, modData, hardData) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  charts[id] = new Chart(el, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Easy Z1+Z2", data: easyData, backgroundColor: "#42a5f5b0", stack: "pol", borderWidth: 0, borderRadius: 0 },
+        { label: "Mod Z3",     data: modData,  backgroundColor: "#66bb6ab0", stack: "pol", borderWidth: 0, borderRadius: 0 },
+        { label: "Hard Z4+Z5", data: hardData, backgroundColor: "#ef5350b0", stack: "pol", borderWidth: 0, borderRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: true, labels: { color: "#6b7591", font: { size: 11 }, boxWidth: 12, boxHeight: 10 } } },
+      scales: {
+        x: { ...AX, stacked: true },
+        y: { ...AX, stacked: true, title: { display: true, text: "분", color: "#6b7591", font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+function polarSummaryHtml(easy, mod, hard) {
+  const total = easy + mod + hard;
+  if (total === 0) return `<span style="color:var(--muted);font-size:0.8rem">HR 데이터가 있는 세션이 없습니다 — HR존 재계산을 실행하세요.</span>`;
+  const pE = Math.round(easy / total * 100);
+  const pM = Math.round(mod  / total * 100);
+  const pH = Math.round(hard / total * 100);
+  const gap = 80 - pE;
+  const targetNote = gap <= 0
+    ? `<span style="color:#66bb6a;font-size:0.75rem">80/20 목표 달성 ✓</span>`
+    : `<span style="color:var(--muted);font-size:0.75rem">Easy 목표 80% 대비 ${gap}% 부족</span>`;
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">
+      <span class="polar-chip" style="background:#42a5f518;color:#42a5f5">Easy Z1+Z2 <strong>${pE}%</strong> · ${fmtMin(easy)}</span>
+      <span class="polar-chip" style="background:#66bb6a18;color:#66bb6a">Mod Z3 <strong>${pM}%</strong> · ${fmtMin(mod)}</span>
+      <span class="polar-chip" style="background:#ef535018;color:#ef5350">Hard Z4+Z5 <strong>${pH}%</strong> · ${fmtMin(hard)}</span>
+      ${targetNote}
+    </div>`;
+}
+
+function fmtMin(min) {
+  const h = Math.floor(min / 60);
+  const m = Math.floor(min % 60);
+  return h > 0 ? `${h}h${m}m` : `${Math.round(m)}m`;
+}
 
 function mkBar(id, labels, data, color, yLabel) {
   const el = document.getElementById(id);

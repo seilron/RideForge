@@ -3,6 +3,7 @@ import { getRecordsBySession, getAllSessions } from "../db/index.js";
 import { getProfile } from "../db/index.js";
 import { calcMaxHR, getHRZones } from "../utils/hr.js";
 import { navigate } from "./router.js";
+import { SESSION_TYPE_META } from "../utils/load.js";
 
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_MAP_KEY;
 
@@ -57,7 +58,7 @@ export async function renderSessionDetail(container, sessionId) {
   renderCharts(sampled, zones, chartToGps, cursorRef);
 
   // 심박존 바
-  if (zones) renderZoneBars(records, zones);
+  if (zones) renderZoneBars(records, zones, session.duration);
 }
 
 // ── HTML 템플릿 ──────────────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ function buildDetailHTML(session, sampled, zones, maxHR) {
     <div class="detail-header">
       <button id="back-btn" class="btn-back">← 목록</button>
       <div class="detail-date">${formatDate(session.date)}</div>
+      ${session.session_type ? detailTypeBadge(session.session_type) : ""}
       <div class="session-source-badge">${sourceLabel(session.source)}</div>
     </div>
 
@@ -81,7 +83,8 @@ function buildDetailHTML(session, sampled, zones, maxHR) {
       ${statCard("최고 속도", session.max_speed?.toFixed(1), "km/h", "#66bb6a", `평균 ${session.avg_speed?.toFixed(1)}`)}
       ${hasHR  ? statCard("심박",    Math.round(session.avg_hr),   "bpm", "#ef5350", `최고 ${session.max_hr}`) : ""}
       ${hasCad ? statCard("케이던스", Math.round(session.avg_cadence), "rpm", "#ab47bc") : ""}
-      ${session.calories ? statCard("칼로리", session.calories, "kcal", "#ff6b35") : ""}
+      ${session.calories     ? statCard("칼로리",  session.calories,                 "kcal", "#ff6b35") : ""}
+      ${session.training_load ? statCard("훈련 부하", session.training_load.toFixed(0), "TL",   "#ff6b35") : ""}
     </div>
 
     <!-- 지도 -->
@@ -118,6 +121,13 @@ function buildDetailHTML(session, sampled, zones, maxHR) {
       <div class="chart-wrap"><canvas id="chart-cad"></canvas></div>
     </div>` : ""}
   `;
+}
+
+function detailTypeBadge(type) {
+  const meta = SESSION_TYPE_META[type];
+  if (!meta) return "";
+  const c = meta.color;
+  return `<span style="font-size:0.75rem;padding:3px 10px;border-radius:5px;background:${c}20;color:${c};border:1px solid ${c}40;font-weight:600">${meta.label}</span>`;
 }
 
 function statCard(label, value, unit, color, sub = "") {
@@ -409,7 +419,7 @@ function makeZoneBgPlugin(zones) {
 
 // ── 심박존 바 ─────────────────────────────────────────────────────────────────
 
-function renderZoneBars(records, zones) {
+function renderZoneBars(records, zones, totalSec) {
   const container = document.getElementById("zone-bars");
   if (!container) return;
 
@@ -420,20 +430,28 @@ function renderZoneBars(records, zones) {
       if (r.heart_rate >= zones[i].min) { counts[i]++; break; }
     }
   }
-  const total = counts.reduce((a, b) => a + b, 0);
+  const total    = counts.reduce((a, b) => a + b, 0);
   const maxCount = Math.max(...counts);
 
   container.innerHTML = zones.map((z, i) => {
-    const pct = total > 0 ? Math.round(counts[i] / total * 100) : 0;
+    const pct  = total > 0 ? Math.round(counts[i] / total * 100) : 0;
     const barH = total > 0 ? Math.round(counts[i] / maxCount * 60) + 4 : 4;
+    const zoneSec = totalSec != null ? Math.round(pct / 100 * totalSec) : null;
     return `
       <div class="zone-bar-wrap">
         <div class="zone-bar-pct">${pct}%</div>
+        ${zoneSec != null ? `<div class="zone-bar-time">${fmtZoneSec(zoneSec)}</div>` : ""}
         <div class="zone-bar" style="height:${barH}px;background:${z.color}"></div>
         <div class="zone-bar-label">${z.label}</div>
         <div class="zone-bar-range">${z.min}–${z.max}</div>
       </div>`;
   }).join("");
+}
+
+function fmtZoneSec(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return h > 0 ? `${h}h${m}m` : `${m}m`;
 }
 
 // ── 유틸 ─────────────────────────────────────────────────────────────────────

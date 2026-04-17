@@ -1,5 +1,6 @@
 import { getAllSessions, deleteSession, exportAllData, importData } from "../db/index.js";
 import { navigate } from "./router.js";
+import { SESSION_TYPE_META } from "../utils/load.js";
 
 /**
  * 세션 목록 화면 렌더링
@@ -77,14 +78,18 @@ function makeSessionCard(s) {
   card.className = "session-card";
   card.innerHTML = `
     <div class="session-card-main" data-id="${s.id}">
-      <div class="session-date">${formatDate(s.date)}</div>
+      <div class="session-date-row">
+        <span class="session-date">${formatDate(s.date)}</span>
+        ${s.session_type ? sessionTypeBadge(s.session_type) : ""}
+      </div>
       <div class="session-stats">
         <span class="stat"><strong>${s.distance?.toFixed(1) ?? "—"}</strong> km</span>
         <span class="stat"><strong>${formatDuration(s.duration)}</strong></span>
         <span class="stat"><strong>${s.avg_speed?.toFixed(1) ?? "—"}</strong> km/h</span>
         ${s.avg_hr ? `<span class="stat"><strong>${Math.round(s.avg_hr)}</strong> bpm</span>` : ""}
       </div>
-      <div class="session-source">${sourceLabel(s.source)}</div>
+      ${s.hr_zone_dist ? miniZoneBar(s.hr_zone_dist) : ""}
+      <div class="session-source" style="margin-top:6px">${sourceLabel(s.source)}</div>
     </div>
     <button class="btn-delete" data-id="${s.id}" title="삭제">✕</button>
   `;
@@ -101,6 +106,25 @@ function makeSessionCard(s) {
     });
 
   return card;
+}
+
+function sessionTypeBadge(type) {
+  const meta = SESSION_TYPE_META[type];
+  if (!meta) return "";
+  const c = meta.color;
+  return `<span class="session-type-badge" style="background:${c}20;color:${c};border:1px solid ${c}40">${meta.label}</span>`;
+}
+
+function miniZoneBar(dist) {
+  const ZONE_COLORS = ["#546e7a", "#42a5f5", "#66bb6a", "#ffa726", "#ef5350"];
+  const ZONE_KEYS   = ["z1", "z2", "z3", "z4", "z5"];
+  const ZONE_LABELS = ["Z1", "Z2", "Z3", "Z4", "Z5"];
+  const segs = ZONE_KEYS.map((k, i) => {
+    const pct = Math.round((dist[k] ?? 0) * 100);
+    if (pct === 0) return "";
+    return `<div style="flex:${pct};background:${ZONE_COLORS[i]}" title="${ZONE_LABELS[i]}: ${pct}%"></div>`;
+  }).join("");
+  return `<div class="mini-zone-bar">${segs}</div>`;
 }
 
 function formatDate(iso) {
