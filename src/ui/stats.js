@@ -266,8 +266,9 @@ function buildShell(summary, maxHR, profile, zones, zoneTimes) {
         <span>심박존 분포 <span class="badge">전체</span>
         <span class="badge">MAX ${maxHR} bpm · ${profile?.max_hr_observed ? "실측" : "Nes 공식"}</span></span>
         <button id="btn-recalc-zones" class="btn-secondary"
-          style="font-size:0.75rem;padding:4px 10px;margin-left:auto">
-          현재 HR존으로 재계산
+          style="font-size:0.75rem;padding:4px 10px;margin-left:auto"
+          title="모든 세션의 HR존 분포·훈련 부하·세션 유형을 현재 프로필 기준으로 재계산합니다">
+          분석 마이그레이션
         </button>
       </div>
       <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-top:10px">
