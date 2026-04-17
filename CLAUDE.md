@@ -176,7 +176,20 @@ src/
 - 주간 탭: 요일별 거리·횟수·심박·케이던스 차트
 - 이전/다음 기간 내비게이션
 
-### 4단계 — 코칭 엔진 🔲 미구현
+### 4단계 — 코칭 엔진 ✅ 구현완료
+- Phase 1: 훈련 부하 계산 엔진 (load.js) — ATL/CTL/TSB, calcTrainingLoad, calcHRZoneDist
+- Phase 2: 세션 자동 분류 + 운동 후 리포트 (coach.js 섹션 A·B·C)
+- Phase 3: 케이던스 전환 추적 (cadence.js + coach.js 섹션 D)
+- Phase 4: 바이크 프로파일 + 튜닝 가이드 (coach.js 섹션 F)
+- Phase 5: Claude.ai 연계 프롬프트 생성기 (prompt.js + coach.js 섹션 G)
+- D-Day 트래커 (coach.js 섹션 E) — CTL 예측: EMA 수렴 공식 (최근 28일 avgLoad 기반)
+  - 주의: 선형 외삽 방식은 훈련 초기에 비현실적 값(374 등) 발생 → EMA 공식만 사용
+
+### 혼합 훈련 분석 개선 ✅
+- sessions.js: session_type 컬러 뱃지 + Z1~Z5 미니 존바 (hr_zone_dist 있을 때)
+- detail.js: 세션 유형 뱃지 + 훈련 부하(TL) 스탯 카드 + 심박존 절대 시간(분) 표시
+- stats.js: 월간·주간 탭에 Easy(Z1+Z2)/Mod(Z3)/Hard(Z4+Z5) 스택 바 + 80% Easy 달성률
+- 기존 세션 마이그레이션: 누적 분석 화면의 **분석 마이그레이션** 버튼으로 일괄 처리
 
 #### 유저 컨텍스트
 - 목표: 6개월 내 국토종주 (633km / 4박 5일)
@@ -332,9 +345,32 @@ npm run dev
 # 빌드
 npm run build
 
+# 배포 (Vercel)
+vercel --prod --yes
+
 # 환경변수 (.env.local)
 VITE_KAKAO_MAP_KEY=<카카오 지도 API 앱 키>
 ```
+
+### Vercel 배포 + PWA 자동 갱신 인프라
+
+PWA 서비스워커(SW) 캐시 문제 방지를 위해 두 가지 장치가 적용되어 있음.
+
+**1. 빌드 타임 주입 — 매 배포마다 JS 해시 강제 변경 (vite.config.js)**
+```js
+define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString()) }
+```
+- Vite 번들 내용이 같아도 빌드 시각이 달라지므로 해시(파일명)가 항상 바뀜
+- SW 프리캐시 매니페스트도 갱신되어 브라우저가 새 파일을 내려받음
+
+**2. SW 즉시 활성화 — 모바일 PWA 자동 갱신 (src/sw.js)**
+```js
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+```
+- `skipWaiting`: 새 SW가 설치되면 대기 없이 즉시 활성화
+- `clients.claim`: 활성화 즉시 열린 탭/PWA 전체 제어권 획득
+- 이 두 줄이 없으면 모바일 PWA는 앱을 완전히 종료해야만 새 버전이 적용됨
 
 ---
 
